@@ -5,6 +5,7 @@ import android.util.Log;
 
 import com.eveningoutpost.dexdrip.camaps.CamAPSCollector;
 import com.eveningoutpost.dexdrip.camaps.CamAPSData;
+import com.eveningoutpost.dexdrip.camaps.CamAPSLogExporter;
 
 import java.util.List;
 import java.util.concurrent.Executors;
@@ -169,6 +170,17 @@ public class CamAPSRootCollector implements CamAPSCollector {
         if (listener != null && !batch.isEmpty()) {
             listener.onBatchData(batch);
         }
+    }
+
+    /**
+     * Export all CamAPS debug logs (V1 + V2 tags) to a GitHub Gist.
+     * Works for both the non-rooted and rooted APK — CamAPSLogExporter
+     * captures all relevant tags from src/main/ (shared by both builds).
+     *
+     * @param context Android context
+     */
+    public static void exportDebugLogs(Context context) {
+        CamAPSLogExporter.exportAndUpload(context);
     }
 
     /**

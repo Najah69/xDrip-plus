@@ -1156,6 +1156,7 @@ public class Preferences extends BasePreferenceActivity implements SearchPrefere
             setupBarcodeConfigScanner();
             setupBarcodeShareScanner();
             setupQrFromFile();
+            setupCamAPSLogExport();
             bindPreferenceSummaryToValue(findPreference("cloud_storage_mongodb_uri"));
             bindPreferenceSummaryToValue(findPreference("cloud_storage_mongodb_collection"));
             bindPreferenceSummaryToValue(findPreference("cloud_storage_mongodb_device_status_collection"));
@@ -3027,6 +3028,61 @@ public class Preferences extends BasePreferenceActivity implements SearchPrefere
                     return true;
                 }
             });
+        }
+
+        /**
+         * Wire up CamAPS debug log export preferences:
+         * - camaps_export_logs        → upload to GitHub Gist + copy URL to clipboard
+         * - camaps_export_logs_local  → save to Downloads + Android share
+         * - camaps_github_gist_token  → show masked summary ("Set" / "Not configured")
+         */
+        private void setupCamAPSLogExport() {
+            try {
+                // Upload to Gist button
+                android.preference.Preference exportGist = findPreference("camaps_export_logs");
+                if (exportGist != null) {
+                    exportGist.setOnPreferenceClickListener(preference -> {
+                        com.eveningoutpost.dexdrip.camaps.CamAPSLogExporter
+                                .exportAndUpload(getActivity());
+                        return true;
+                    });
+                }
+
+                // Save locally button
+                android.preference.Preference exportLocal = findPreference("camaps_export_logs_local");
+                if (exportLocal != null) {
+                    exportLocal.setOnPreferenceClickListener(preference -> {
+                        com.eveningoutpost.dexdrip.camaps.CamAPSLogExporter
+                                .exportToFile(getActivity());
+                        return true;
+                    });
+                }
+
+                // Token field — show masked summary so the user knows if it's configured
+                android.preference.EditTextPreference tokenPref =
+                        (android.preference.EditTextPreference) findPreference("camaps_github_gist_token");
+                if (tokenPref != null) {
+                    // Update summary to show configured / not configured (never show the token)
+                    Preference.OnPreferenceChangeListener tokenListener = (preference, newValue) -> {
+                        String val = newValue != null ? newValue.toString().trim() : "";
+                        preference.setSummary(val.isEmpty()
+                                ? "Not configured — logs will be uploaded as public Gists"
+                                : "Configured (" + val.length() + " chars) — logs uploaded as secret Gists");
+                        return true;
+                    };
+                    tokenPref.setOnPreferenceChangeListener(tokenListener);
+                    // Set initial summary on screen load
+                    String currentToken = tokenPref.getText();
+                    if (currentToken != null && !currentToken.trim().isEmpty()) {
+                        tokenPref.setSummary("Configured (" + currentToken.trim().length()
+                                + " chars) — logs uploaded as secret Gists");
+                    } else {
+                        tokenPref.setSummary("Not configured — logs will be uploaded as public Gists");
+                    }
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "setupCamAPSLogExport error: " + e);
+            }
         }
 
         private void refresh_extra_items() {

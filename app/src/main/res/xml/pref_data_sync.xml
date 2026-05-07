@@ -461,6 +461,107 @@
 
         </PreferenceScreen>
 
+        <PreferenceScreen
+            android:icon="@drawable/ic_cloud_upload_grey600_48dp"
+            android:key="camaps_bridge"
+            android:summary="Scrape CamAPS FX data via accessibility service"
+            android:title="CamAPS Bridge (BETA)">
+
+            <SwitchPreference
+                android:defaultValue="false"
+                android:key="camaps_bridge_enabled"
+                android:summary="Enable the CamAPS Bridge to collect IOB, COB, basal rate, pump status, and enriched glucose data from the CamAPS FX app"
+                android:switchTextOff="@string/short_off_text_for_switches"
+                android:switchTextOn="@string/short_on_text_for_switches"
+                android:title="Enable CamAPS Bridge" />
+
+            <SwitchPreference
+                android:defaultValue="true"
+                android:dependency="camaps_bridge_enabled"
+                android:key="camaps_scrape_glucose"
+                android:summary="Collect glucose values and trend arrows"
+                android:switchTextOff="@string/short_off_text_for_switches"
+                android:switchTextOn="@string/short_on_text_for_switches"
+                android:title="Scrape glucose + trend" />
+
+            <SwitchPreference
+                android:defaultValue="true"
+                android:dependency="camaps_bridge_enabled"
+                android:key="camaps_scrape_iob"
+                android:summary="Collect Insulin On Board (active insulin)"
+                android:switchTextOff="@string/short_off_text_for_switches"
+                android:switchTextOn="@string/short_on_text_for_switches"
+                android:title="Scrape IOB" />
+
+            <SwitchPreference
+                android:defaultValue="true"
+                android:dependency="camaps_bridge_enabled"
+                android:key="camaps_scrape_cob"
+                android:summary="Collect Carbs On Board and carb entries"
+                android:switchTextOff="@string/short_off_text_for_switches"
+                android:switchTextOn="@string/short_on_text_for_switches"
+                android:title="Scrape COB" />
+
+            <SwitchPreference
+                android:defaultValue="true"
+                android:dependency="camaps_bridge_enabled"
+                android:key="camaps_scrape_basal"
+                android:summary="Collect current basal rate"
+                android:switchTextOff="@string/short_off_text_for_switches"
+                android:switchTextOn="@string/short_on_text_for_switches"
+                android:title="Scrape basal rate" />
+
+            <SwitchPreference
+                android:defaultValue="true"
+                android:dependency="camaps_bridge_enabled"
+                android:key="camaps_scrape_pump"
+                android:summary="Collect pump battery and reservoir levels"
+                android:switchTextOff="@string/short_off_text_for_switches"
+                android:switchTextOn="@string/short_on_text_for_switches"
+                android:title="Scrape pump status" />
+
+            <SwitchPreference
+                android:defaultValue="false"
+                android:dependency="camaps_bridge_enabled"
+                android:key="camaps_debug_log"
+                android:summary="Log all CamAPS data collection to logcat"
+                android:switchTextOff="@string/short_off_text_for_switches"
+                android:switchTextOn="@string/short_on_text_for_switches"
+                android:title="Debug logging" />
+
+            <Preference
+                android:dependency="camaps_bridge_enabled"
+                android:key="camaps_open_accessibility"
+                android:summary="Open Android system accessibility settings to enable the CamAPS Bridge service"
+                android:title="Open Accessibility Settings">
+                <intent
+                    android:action="android.settings.ACCESSIBILITY_SETTINGS" />
+            </Preference>
+
+            <!-- ── Debug Log Export ──────────────────────────────────────── -->
+
+            <EditTextPreference
+                android:key="camaps_github_gist_token"
+                android:title="GitHub Token (for log export)"
+                android:summary="Personal Access Token with 'gist' scope — used to upload debug logs as secret Gists. Without token, logs are uploaded as public Gists."
+                android:inputType="textPassword"
+                android:dialogTitle="GitHub Personal Access Token"
+                android:dialogMessage="Create a PAT at github.com/settings/tokens with 'gist' scope. Leave empty for anonymous public Gists."
+                android:positiveButtonText="Save"
+                android:negativeButtonText="Cancel" />
+
+            <Preference
+                android:key="camaps_export_logs"
+                android:title="📋 Export Debug Logs to GitHub Gist"
+                android:summary="Capture last 2000 CamAPS log lines → save locally → upload to GitHub Gist → URL copied to clipboard" />
+
+            <Preference
+                android:key="camaps_export_logs_local"
+                android:title="💾 Save Debug Logs locally"
+                android:summary="Capture CamAPS logs and save to Downloads folder (no upload)" />
+
+        </PreferenceScreen>
+
     </PreferenceCategory>
 
 </PreferenceScreen>

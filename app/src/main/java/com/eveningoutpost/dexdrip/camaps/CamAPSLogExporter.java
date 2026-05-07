@@ -89,12 +89,16 @@ public class CamAPSLogExporter {
                 Log.i(TAG, "Logcat saved to: " + savedFile.getAbsolutePath());
 
                 String token = getGistToken(context);
-                String gistUrl = uploadToGist(logContent, token, false);
+                // If token is set → secret Gist (URL-only access)
+                // If no token    → public Gist (anonymous, still requires URL to find)
+                boolean isSecret = token != null && !token.isEmpty();
+                String gistUrl = uploadToGist(logContent, token, isSecret);
 
                 if (gistUrl != null) {
-                    Log.i(TAG, "Gist uploaded: " + gistUrl);
+                    Log.i(TAG, "Gist uploaded (" + (isSecret ? "secret" : "public") + "): " + gistUrl);
                     copyToClipboard(context, gistUrl);
-                    JoH.static_toast_long("Log uploaded! URL copied to clipboard:\n" + gistUrl);
+                    JoH.static_toast_long("Log uploaded (" + (isSecret ? "secret" : "public")
+                            + ")!\nURL copied to clipboard:\n" + gistUrl);
                 } else {
                     // Fallback: share the local file
                     JoH.static_toast_long("Upload failed. File saved:\n" + savedFile.getName());

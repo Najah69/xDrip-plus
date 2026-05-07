@@ -44,7 +44,9 @@ import java.net.SocketTimeoutException;
 import java.security.DigestInputStream;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.util.Locale;
+import java.text.ParseException;
+import java.text.SimpleDateFormat;
+import java.util.TimeZone;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -65,6 +67,14 @@ public class UpdateActivity extends BaseAppCompatActivity {
     private static final String last_update_check_time = "last_update_check_time";
     private static final String TAG = "jamorham update";
     private static final String UP_LOAD_BALANCER = "UP_LOAD_BALANCER";
+    // m3: Gson instance reused — thread-safe, expensive to create
+    private static final com.google.gson.Gson GSON = new com.google.gson.Gson();
+    // GitHub ISO-8601 date format — compatible with all API levels (no java.time.*)
+    private static final SimpleDateFormat GITHUB_DATE_FORMAT;
+    static {
+        GITHUB_DATE_FORMAT = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", java.util.Locale.US);
+        GITHUB_DATE_FORMAT.setTimeZone(TimeZone.getTimeZone("UTC"));
+    }
     private static OkHttpClient httpClient = null;
     public static long last_check_time = 0;
     private static SharedPreferences prefs;
@@ -99,15 +109,9 @@ public class UpdateActivity extends BaseAppCompatActivity {
             last_check_time = JoH.tsl();
             prefs.edit().putLong(last_update_check_time, last_check_time).apply();
 
-            Log.i(TAG, "Checking for a software update, channel: " + channel);
+            Log.i(TAG, "Checking for a software update");
 
-            String subversion = "";
-            if (!context.getString(R.string.app_name).equals("xDrip+")) {
-                subversion = context.getString(R.string.app_name).replaceAll("[^a-zA-Z0-9]", "");
-                Log.d(TAG, "Using subversion: " + subversion);
-            }
-
-            final String CHECK_URL = context.getString((incrementLong(UP_LOAD_BALANCER) % 2 == 1) ? R.string.qserviceurl : R.string.wserviceurl) + "/update-check/" + channel + subversion;
+            final String CHECK_URL = "https://api.github.com/repos/Najah69/xDrip-plus/releases/latest";
             DOWNLOAD_URL = "";
             newversion = 0;
 
@@ -123,93 +127,107 @@ public class UpdateActivity extends BaseAppCompatActivity {
                     getVersionInformation(context);
                     if (versionnumber == 0) return;
 
-                    String locale = "";
-                    try {
-                        locale = Locale.getDefault().toString();
-                        if (locale == null) locale = "";
-                    } catch (Exception e) {
-                        // do nothing
-                    }
-
-
                     final Request request = new Request.Builder()
-                            // Mozilla header facilitates compression
-                            .header("User-Agent", "Mozilla/5.0")
+                            .header("User-Agent", "xDrip-CamAPS-Bridge")
+                            .header("Accept", "application/vnd.github.v3+json")
                             .header("Connection", "close")
-                            .url(CHECK_URL + "?r=" + Long.toString((System.currentTimeMillis() / 100000) % 9999999) + "&ln=" + JoH.urlEncode(locale))
+                            .url(CHECK_URL)
                             .build();
 
                     final Response response = httpClient.newCall(request).execute();
                     if (response.isSuccessful()) {
+                        final String jsonBody = response.body().string();
+                        // m3: use shared GSON instance, not new instance per call
+                        com.google.gson.JsonObject json = GSON.fromJson(jsonBody, com.google.gson.JsonObject.class);
 
-                        final String[] lines = response.body().string().split("\\r?\\n");
-                        if (lines.length > 1) {
+                        if (json != null && json.has("published_at") && json.has("assets")) {
                             try {
-                                newversion = Integer.parseInt(lines[0]);
-                                if ((newversion > versionnumber) || (debug)) {
-                                    if (lines[1].startsWith("http")) {
-                                        Log.i(TAG, "Notifying user of new update available our version: " + versionnumber + " new: " + newversion);
-                                        DOWNLOAD_URL = lines[1];
-                                        if (lines.length > 2) {
-                                            try {
-                                                FILE_SIZE = Integer.parseInt(lines[2]);
-                                            } catch (NumberFormatException | NullPointerException e) {
-                                                Log.e(TAG, "Got exception processing update download parameters");
+                                String publishedAt = json.get("published_at").getAsString();
+                                // C1: use SimpleDateFormat instead of java.time.Instant (requires API 26)
+                                long releaseEpoch;
+                                try {
+                                    releaseEpoch = GITHUB_DATE_FORMAT.parse(publishedAt).getTime() / 1000;
+                                } catch (ParseException pe) {
+                                    Log.e(TAG, "Cannot parse release date: " + publishedAt);
+                                    if (fromUi) JoH.static_toast_long("Update check failed: invalid date format");
+                                    return;
+                                }
+                                long buildEpoch = BuildConfig.buildTimestamp / 1000;
+
+                                // C2: avoid int overflow (Y2038) — store as long, derive display int safely
+                                newversion = (int) (releaseEpoch % 100_000_000L);
+
+                                if ((releaseEpoch > buildEpoch) || debug) {
+                                    // M1: find the non-rooted APK asset by name, not just index 0
+                                    com.google.gson.JsonArray assets = json.getAsJsonArray("assets");
+                                    com.google.gson.JsonObject selectedAsset = null;
+                                    if (assets != null) {
+                                        for (int i = 0; i < assets.size(); i++) {
+                                            com.google.gson.JsonObject a = assets.get(i).getAsJsonObject();
+                                            String assetName = a.has("name") ? a.get("name").getAsString() : "";
+                                            if (assetName.endsWith(".apk") && !assetName.toLowerCase().contains("rooted")) {
+                                                selectedAsset = a;
+                                                break;
                                             }
-                                        } else {
-                                            FILE_SIZE = -1;
                                         }
-                                        if (lines.length > 3) {
-                                            MESSAGE = lines[3];
-                                        } else {
-                                            MESSAGE = "";
+                                        // Fallback: take first APK if no non-rooted match
+                                        if (selectedAsset == null && assets.size() > 0) {
+                                            selectedAsset = assets.get(0).getAsJsonObject();
                                         }
-                                        if (lines.length > 4) {
-                                            CHECKSUM = lines[4];
-                                        } else {
-                                            CHECKSUM = "";
-                                        }
+                                    }
+                                    if (selectedAsset != null) {
+                                        DOWNLOAD_URL = selectedAsset.get("browser_download_url").getAsString();
+                                        FILE_SIZE = selectedAsset.has("size") ? selectedAsset.get("size").getAsInt() : -1;
+
+                                        Log.i(TAG, "New release available. Build: " + buildEpoch + " Release: " + releaseEpoch);
+
+                                        // M2: truncate release notes — GitHub bodies can be hundreds of KB
+                                        String rawBody = (json.has("body") && !json.get("body").isJsonNull())
+                                                ? json.get("body").getAsString() : "";
+                                        MESSAGE = rawBody.length() > 500
+                                                ? rawBody.substring(0, 500) + "\n…" : rawBody;
+                                        CHECKSUM = "";
 
                                         final Intent intent = new Intent(context, UpdateActivity.class);
                                         intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                                         context.startActivity(intent);
 
                                         if (!fromUi) {
-                                            // activate the flag for a notification if this was a background check
                                             PersistentStore.setBoolean(XDRIP_UPDATE_NOTIFICATION_PENDING, true);
                                         }
-
                                     } else {
-                                        Log.e(TAG, "Error parsing second line of update reply");
+                                        Log.d(TAG, "No APK assets in latest release");
+                                        if (fromUi) showUpToDateDialog(context, channel);
                                     }
                                 } else {
-                                    Log.i(TAG, "Our current version is the most recent: " + versionnumber + " vs " + newversion);
-                                    if (fromUi) { // Only for manual update check
-                                        if (channel.equals("nightly")) {
-                                            JoH.static_toast_long(xdrip.gs(R.string.current_version_is_up_to_date));
-                                        } else {
-                                            ((Activity) context).runOnUiThread(() -> {
-                                                AlertDialog.Builder builder = new AlertDialog.Builder(context);
-                                                builder.setTitle(context.getString(R.string.title_dialog_check_for_update, channel));
-                                                builder.setMessage(context.getString(R.string.message_dialog_check_for_update));
-                                                builder.setPositiveButton(R.string.close, null);
-                                                builder.show();
-                                            });
-                                        }
-                                    }
+                                    Log.i(TAG, "Current version is up to date. Build: " + buildEpoch + " Release: " + releaseEpoch);
+                                    if (fromUi) showUpToDateDialog(context, channel);
                                 }
                             } catch (Exception e) {
-                                Log.e(TAG, "Got exception parsing update version: " + e.toString());
+                                Log.e(TAG, "Error parsing GitHub release: " + e.toString());
+                                if (fromUi) {
+                                    JoH.static_toast_long("Update check failed: " + e.getMessage());
+                                }
                             }
                         } else {
-                            Log.d(TAG, "zero lines received in reply");
+                            Log.d(TAG, "No release found or invalid response");
+                            if (fromUi) showUpToDateDialog(context, channel);
                         }
-                        Log.i(TAG, "Success getting latest software version");
+                    } else if (response.code() == 403) {
+                        // M3 (rate limit): explicit handling — 60 req/hour unauthenticated
+                        Log.w(TAG, "GitHub API rate limit reached (HTTP 403)");
+                        if (fromUi) JoH.static_toast_long("Update rate limit reached, try again later");
                     } else {
-                        Log.d(TAG, "Failure getting update URL data: code: " + response.code());
+                        Log.d(TAG, "GitHub API error: " + response.code());
+                        if (fromUi) {
+                            JoH.static_toast_long("Update server unavailable (HTTP " + response.code() + ")");
+                        }
                     }
                 } catch (Exception e) {
-                    UserError.Log.e(TAG, "Exception in reading http update version " + e.toString());
+                    UserError.Log.e(TAG, "Exception checking GitHub for update: " + e.toString());
+                    if (fromUi) {
+                        JoH.static_toast_long("Update check error: " + e.getMessage());
+                    }
                 }
                 httpClient = null; // for GC
             }).start();
@@ -220,6 +238,20 @@ public class UpdateActivity extends BaseAppCompatActivity {
         JoH.static_toast_long(xdrip.gs(R.string.checking_for_update));
         UpdateActivity.last_check_time = -2;
         UpdateActivity.checkForAnUpdate(xdrip.getAppContext());
+    }
+
+    private static void showUpToDateDialog(Context context, String channel) {
+        if (channel.equals("nightly")) {
+            JoH.static_toast_long(xdrip.gs(R.string.current_version_is_up_to_date));
+        } else {
+            ((Activity) context).runOnUiThread(() -> {
+                AlertDialog.Builder builder = new AlertDialog.Builder(context);
+                builder.setTitle(context.getString(R.string.title_dialog_check_for_update, channel));
+                builder.setMessage(context.getString(R.string.message_dialog_check_for_update));
+                builder.setPositiveButton(R.string.close, null);
+                builder.show();
+            });
+        }
     }
 
     public static boolean testAndSetNightly(final boolean set) {

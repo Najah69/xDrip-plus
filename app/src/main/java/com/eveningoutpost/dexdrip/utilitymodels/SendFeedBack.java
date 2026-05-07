@@ -2,6 +2,7 @@ package com.eveningoutpost.dexdrip.utilitymodels;
 
 import android.content.DialogInterface;
 import android.content.Intent;
+import android.net.Uri;
 import android.os.Bundle;
 
 import android.text.InputType;
@@ -16,19 +17,7 @@ import android.widget.Toast;
 import com.eveningoutpost.dexdrip.BaseAppCompatActivity;
 import com.eveningoutpost.dexdrip.models.JoH;
 import com.eveningoutpost.dexdrip.R;
-import com.eveningoutpost.dexdrip.watch.thinjam.BlueJayEntry;
-import com.eveningoutpost.dexdrip.cgm.nsfollow.GzipRequestInterceptor;
-import okhttp3.FormBody;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.RequestBody;
-import okhttp3.Response;
-
-import java.io.IOException;
-import java.util.concurrent.TimeUnit;
-
-import static com.eveningoutpost.dexdrip.utils.DexCollectionType.getBestCollectorHardwareName;
-import static com.eveningoutpost.dexdrip.watch.thinjam.BlueJayEntry.isNative;
+import java.net.URLEncoder;
 
 import androidx.appcompat.app.AlertDialog;
 
@@ -38,7 +27,6 @@ public class SendFeedBack extends BaseAppCompatActivity {
     private static final String FEEDBACK_CONTACT_REFERENCE = "feedback-contact-reference";
 
     private String type_of_message = "Unknown";
-    private String send_url;
 
     private String log_data = "";
 
@@ -50,7 +38,6 @@ public class SendFeedBack extends BaseAppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_send_feed_back);
-        send_url = getString(isNative() ? R.string.qserviceurl : R.string.wserviceurl) + "/joh-feedback";
 
         myrating = (RatingBar) findViewById(R.id.ratingBar);
         ratingtext = (TextView) findViewById(R.id.ratingtext);
@@ -141,10 +128,6 @@ public class SendFeedBack extends BaseAppCompatActivity {
 
         final EditText contact = (EditText) findViewById(R.id.contactText);
         final EditText yourtext = (EditText) findViewById(R.id.yourText);
-        final OkHttpClient client = OkHttpWrapper.getClient().newBuilder()
-                .writeTimeout(30, TimeUnit.SECONDS)
-                .addInterceptor(new GzipRequestInterceptor())
-                .build();
 
         if (yourtext.length() == 0) {
             toast("No text entered - cannot send blank");
@@ -163,41 +146,51 @@ public class SendFeedBack extends BaseAppCompatActivity {
         }
 
         PersistentStore.setString(FEEDBACK_CONTACT_REFERENCE, contact.getText().toString());
-        toast("Sending..");
 
+        // M2: warn user that feedback will be a public GitHub issue containing medical data
+        final String contactText = contact.getText().toString();
+        final String messageText = yourtext.getText().toString();
+        new AlertDialog.Builder(this)
+            .setTitle("Public issue on GitHub")
+            .setMessage("Your feedback will be posted as a public GitHub issue.\n\n"
+                    + "If your message contains medical data (glucose values, insulin doses), "
+                    + "it will be publicly visible.\n\nContinue?")
+            .setPositiveButton("Continue", (dialog, which) -> doSendFeedback(contactText, messageText))
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+
+    private void doSendFeedback(final String contactText, final String messageText) {
         try {
-            final RequestBody formBody = new FormBody.Builder()
-                    .add("contact", contact.getText().toString())
-                    .add("body",yourtext.getText().toString() + " \n\n===\nType: " + type_of_message + "\nLog data:\n\n" + log_data)  // Adding "Your text" and type to the log
-                    .add("rating", String.valueOf(myrating.getRating()))
-                    .add("type", type_of_message)
-                    .build();
-            new Thread(new Runnable() {
-                public void run() {
-                    try {
-                        final Request request = new Request.Builder()
-                                .url(send_url)
-                                .post(formBody)
-                                .build();
-                        Log.i(TAG, "Sending feedback request");
-                        final Response response = client.newCall(request).execute();
-                        if (response.isSuccessful()) {
-                            JoH.static_toast_long(response.body().string());
-                            log_data = "";
-                            //Home.toaststatic("Feedback sent successfully");
-                            finish();
-                        } else {
-                            JoH.static_toast_short("Error sending feedback: " + response.message().toString());
-                        }
-                    } catch (Exception e) {
-                        Log.e(TAG, "Got exception in execute: " + e.toString());
-                        JoH.static_toast_short("Error with network connection");
-                    }
-                }
-            }).start();
+            String title = "[" + type_of_message + "] xDrip+ CamAPS Bridge Feedback";
+            String body = "**Contact:** " + contactText + "\n\n"
+                    + "**Message:**\n" + messageText + "\n\n"
+                    + "**Rating:** " + myrating.getRating() + "/5\n\n"
+                    + "---\n"
+                    + "**Type:** " + type_of_message + "\n\n";
+            if (log_data != null && !log_data.isEmpty()) {
+                // Truncate log data — already long in the body
+                String truncatedLog = log_data.length() > 1000
+                        ? log_data.substring(0, 1000) + "\n... (truncated)" : log_data;
+                body += "**Log data:**\n```\n" + truncatedLog + "\n```\n";
+            }
+
+            // M1: limit body to ~2000 chars before URL encoding
+            // URLEncoder can triple the size of special chars — target safe URL length
+            if (body.length() > 2000) {
+                body = body.substring(0, 2000) + "\n\n... (truncated)";
+            }
+
+            String url = "https://github.com/Najah69/xDrip-plus/issues/new"
+                    + "?title=" + URLEncoder.encode(title, "UTF-8")
+                    + "&body="  + URLEncoder.encode(body, "UTF-8");
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            startActivity(intent);
+            log_data = "";
+            finish();
         } catch (Exception e) {
-            JoH.static_toast_short(e.getMessage());
-            Log.e(TAG, "General exception: " + e.toString());
+            Log.e(TAG, "Error opening feedback URL: " + e);
+            JoH.static_toast_short("Error opening browser");
         }
     }
 

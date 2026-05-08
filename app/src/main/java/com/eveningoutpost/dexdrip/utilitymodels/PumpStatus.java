@@ -18,7 +18,9 @@ public class PumpStatus {
     private static final String TAG = "PumpStatus";
     private static final String PUMP_RESERVOIR = "pump-reservoir";
     private static final String PUMP_BOLUSIOB = "pump-bolusiob";
-    private static final String PUMP_BATTERY = "pump-battery";
+    private static final String PUMP_BATTERY  = "pump-battery";
+    // CamAPS Bridge: current basal rate (U/h) sent to Nightscout devicestatus
+    private static final String PUMP_BASAL    = "pump-basal";
     private static final String TIME = "-time";
 
     private static String last_json = "";
@@ -67,6 +69,20 @@ public class PumpStatus {
         return getValue(PUMP_BATTERY);
     }
 
+    /** CamAPS Bridge — store current basal rate (U/h) for Nightscout devicestatus upload */
+    public static void setBasal(double basalRateUh) {
+        setValue(PUMP_BASAL, basalRateUh);
+    }
+
+    private static double getBasal() {
+        return getValue(PUMP_BASAL);
+    }
+
+    public static String getBasalString() {
+        final double value = getBasal();
+        return value > -1 ? "↓" + JoH.qs(value, 2) + "U/h " : "";
+    }
+
     public static String getReservoirString() {
         final double reservoir = getReservoir();
         if (reservoir > -1) {
@@ -100,7 +116,12 @@ public class PumpStatus {
         try {
             json.put("reservoir", getReservoir());
             json.put("bolusiob", getBolusIoB());
-            json.put("battery", getBattery());
+            json.put("battery",  getBattery());
+            // CamAPS Bridge: include basal rate in devicestatus.pump
+            final double basal = getBasal();
+            if (basal > -1) {
+                json.put("basal", basal);
+            }
         } catch (JSONException e) {
             Log.e(TAG, "Got exception building PumpStatus " + e);
         }
@@ -113,6 +134,9 @@ public class PumpStatus {
             setReservoir(json.getDouble("reservoir"));
             setBolusIoB(json.getDouble("bolusiob"));
             setBattery(json.getDouble("battery"));
+            if (json.has("basal")) {
+                setBasal(json.getDouble("basal"));
+            }
         } catch (Exception e) {
             Log.e(TAG, "Got exception processing json msg: " + e + " " + msg);
         }

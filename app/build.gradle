@@ -210,12 +210,12 @@ android {
         }
     }
 
-    flavorDimensions "version"
+    flavorDimensions "version", "rootFeature"
     productFlavors {
         // When building a variant that uses this flavor, the following configurations
         // override those in the defaultConfig block.
         fast {
-            // To avoid using legacy multidex when building from the command line,
+            dimension "version"
             // set minSdkVersion to 21 or higher. When using Android Studio 2.3 or higher,
             // the build automatically avoids legacy multidex when deploying to a device running
             // API level 21 or higher—regardless of what you set as your minSdkVersion.
@@ -228,10 +228,20 @@ android {
         }
 
         prod {
+            dimension "version"
             // If you've configured the defaultConfig block for the release version of
             // your app, you can leave this block empty and Gradle uses configurations in
             // the defaultConfig block instead. You still need to create this flavor.
             // Otherwise, all variants use the "dev" flavor configurations.
+        }
+
+        nonRooted {
+            dimension "rootFeature"
+        }
+
+        rooted {
+            dimension "rootFeature"
+            versionNameSuffix "-rooted"
         }
     }
 
@@ -255,6 +265,10 @@ dependencies {
         annotationProcessor 'jakarta.xml.bind:jakarta.xml.bind-api:2.3.3'
         annotationProcessor 'org.glassfish.jaxb:jaxb-runtime:2.3.5'
     }
+
+    // SQLCipher for CamAPS root access (rooted flavor only)
+    rootedImplementation 'net.zetetic:android-database-sqlcipher:4.5.4'
+    rootedImplementation 'androidx.sqlite:sqlite:2.4.0'
 
     // app auth implementation
     //implementation(name: 'core-1.1.0', ext: 'aar')

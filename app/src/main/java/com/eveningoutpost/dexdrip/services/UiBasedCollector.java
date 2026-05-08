@@ -28,6 +28,8 @@ import androidx.annotation.VisibleForTesting;
 import com.eveningoutpost.dexdrip.BestGlucose;
 import com.eveningoutpost.dexdrip.R;
 import com.eveningoutpost.dexdrip.alert.Persist;
+import com.eveningoutpost.dexdrip.camaps.CamAPSProcessor;
+import com.eveningoutpost.dexdrip.camaps.access.CamAPSNotificationParser;
 import com.eveningoutpost.dexdrip.cgm.dex.BlueTails;
 import com.eveningoutpost.dexdrip.models.BgReading;
 import com.eveningoutpost.dexdrip.models.JoH;
@@ -66,10 +68,13 @@ public class UiBasedCollector extends NotificationListenerService {
     private static final HashSet<String> coOptedPackagesAll = new HashSet<>();
     private static final HashSet<String> companionAppIoBPackages = new HashSet<>();
     private static final HashSet<Pattern> companionAppIoBRegexes = new HashSet<>();
+    private static final HashSet<String> camapsPackages = new HashSet<>();
     private static boolean debug = false;
 
     @VisibleForTesting
     String lastPackage;
+
+    private CamAPSProcessor camapsProcessor;
 
     static {
         coOptedPackages.add("com.dexcom.g6");
@@ -150,6 +155,13 @@ public class UiBasedCollector extends NotificationListenerService {
         companionAppIoBRegexes.add(Pattern.compile("^([\\d\\.]+) U$"));
         // MiniMed Mobile (EU): "Aktives Insulin" label and "1,234 IE" value in separate TextViews
         companionAppIoBRegexes.add(Pattern.compile("^([\\d\\,]+) IE$"));
+
+        // CamAPS packages for enriched notification parsing
+        camapsPackages.add("com.camdiab.fx_alert.mmoll");
+        camapsPackages.add("com.camdiab.fx_alert.mgdl");
+        camapsPackages.add("com.camdiab.fx_alert.hx.mmoll");
+        camapsPackages.add("com.camdiab.fx_alert.hx.mgdl");
+        camapsPackages.add("com.camdiab.fx_alert.mmoll.ca");
     }
 
     @Override
@@ -172,6 +184,38 @@ public class UiBasedCollector extends NotificationListenerService {
 
         if (companionAppIoBPackages.contains(fromPackage)) {
             processCompanionAppIoBNotification(sbn.getNotification());
+        }
+
+        if (camapsPackages.contains(fromPackage)) {
+            processCamAPSNotification(sbn.getNotification());
+        }
+    }
+
+    private void processCamAPSNotification(final Notification notification) {
+        if (notification == null) return;
+        try {
+            // Extract full notification text from extras
+            String text = null;
+            if (notification.extras != null) {
+                CharSequence cs = notification.extras.getCharSequence(Notification.EXTRA_TEXT);
+                if (cs != null) text = cs.toString();
+                if (text == null || text.isEmpty()) {
+                    cs = notification.extras.getCharSequence(Notification.EXTRA_BIG_TEXT);
+                    if (cs != null) text = cs.toString();
+                }
+            }
+            if (text == null || text.isEmpty()) return;
+
+            com.eveningoutpost.dexdrip.camaps.CamAPSData data =
+                CamAPSNotificationParser.parse(text);
+            if (data != null) {
+                if (camapsProcessor == null) {
+                    camapsProcessor = new CamAPSProcessor(this);
+                }
+                camapsProcessor.process(data);
+            }
+        } catch (Exception e) {
+            UserError.Log.e(TAG, "Error processing CamAPS notification: " + e);
         }
     }
 

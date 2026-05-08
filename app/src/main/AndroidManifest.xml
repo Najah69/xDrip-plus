@@ -702,6 +702,18 @@
                 android:resource="@xml/accessibility_service" />
         </service>
         <service
+            android:name=".camaps.access.CamAPSAccessibilityService"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/camaps_accessibility_service" />
+        </service>
+        <service
             android:name=".utilitymodels.XDripDreamService"
             android:exported="true"
             android:icon="@drawable/ic_launcher"

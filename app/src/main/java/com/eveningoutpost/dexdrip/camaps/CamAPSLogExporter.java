@@ -89,9 +89,20 @@ public class CamAPSLogExporter {
                 Log.i(TAG, "Logcat saved to: " + savedFile.getAbsolutePath());
 
                 String token = getGistToken(context);
-                // If token is set → secret Gist (URL-only access)
-                // If no token    → public Gist (anonymous, still requires URL to find)
                 boolean isSecret = token != null && !token.isEmpty();
+
+                // Token validation (inspired by filMage FilMageLogger)
+                if (isSecret) {
+                    String tokenError = validateGistToken(token);
+                    if (tokenError != null) {
+                        Log.w(TAG, "Token validation failed: " + tokenError);
+                        JoH.static_toast_long("Token invalid: " + tokenError
+                                + "\nLog saved locally:\n" + savedFile.getName());
+                        shareFile(context, savedFile);
+                        return;
+                    }
+                }
+
                 String gistUrl = uploadToGist(logContent, token, isSecret);
 
                 if (gistUrl != null) {
@@ -263,6 +274,43 @@ public class CamAPSLogExporter {
             }
         } catch (Exception e) {
             Log.e(TAG, "Gist upload error: " + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Validate that the GitHub token has the 'gist' scope.
+     * @return error message if invalid, null if OK or network unavailable.
+     */
+    static String validateGistToken(String token) {
+        try {
+            URL url = new URL("https://api.github.com/user");
+            HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("GET");
+            conn.setRequestProperty("Authorization", "Bearer " + token);
+            conn.setRequestProperty("Accept", "application/vnd.github.v3+json");
+            conn.setRequestProperty("User-Agent", "xDrip-CamAPS-Bridge/" + BuildConfig.VERSION_NAME);
+            conn.setConnectTimeout(10_000);
+            conn.setReadTimeout(10_000);
+
+            int code = conn.getResponseCode();
+            if (code == 200) {
+                String scopes = conn.getHeaderField("X-OAuth-Scopes");
+                if (scopes == null || !scopes.contains("gist")) {
+                    return "No 'gist' scope. Current scopes: '"
+                            + (scopes != null ? scopes : "none")
+                            + "'. Add 'gist' on github.com/settings/tokens.";
+                }
+                return null; // OK
+            } else if (code == 401) {
+                return "Token invalid or expired (HTTP 401).";
+            } else if (code == 403) {
+                return "Access denied (HTTP 403). Token exists but lacks permissions.";
+            } else {
+                return "GitHub API error: HTTP " + code;
+            }
+        } catch (Exception e) {
+            // Network error — don't block the upload, try anyway
             return null;
         }
     }

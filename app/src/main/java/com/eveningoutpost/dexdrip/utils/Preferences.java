@@ -62,6 +62,7 @@ import com.eveningoutpost.dexdrip.GcmActivity;
 import com.eveningoutpost.dexdrip.Home;
 import com.eveningoutpost.dexdrip.NFCReaderX;
 import com.eveningoutpost.dexdrip.ParakeetHelper;
+import com.eveningoutpost.dexdrip.BuildConfig;
 import com.eveningoutpost.dexdrip.R;
 import com.eveningoutpost.dexdrip.WidgetUpdateService;
 import com.eveningoutpost.dexdrip.alert.Registry;
@@ -1157,6 +1158,7 @@ public class Preferences extends BasePreferenceActivity implements SearchPrefere
             setupBarcodeShareScanner();
             setupQrFromFile();
             setupCamAPSLogExport();
+            setupCamAPSOta();
             bindPreferenceSummaryToValue(findPreference("cloud_storage_mongodb_uri"));
             bindPreferenceSummaryToValue(findPreference("cloud_storage_mongodb_collection"));
             bindPreferenceSummaryToValue(findPreference("cloud_storage_mongodb_device_status_collection"));
@@ -3082,6 +3084,84 @@ public class Preferences extends BasePreferenceActivity implements SearchPrefere
                 }
             } catch (Exception e) {
                 Log.e(TAG, "setupCamAPSLogExport error: " + e);
+            }
+        }
+
+        /**
+         * Wire up CamAPS OTA update preferences:
+         * - camaps_ota_version  → shows current version (BuildConfig.VERSION_NAME + buildVersion)
+         * - camaps_ota_check    → check GitHub Releases for updates
+         * - camaps_ota_download → download & install the latest APK
+         */
+        private void setupCamAPSOta() {
+            try {
+                final com.eveningoutpost.dexdrip.camaps.OtaUpdateManager otaManager =
+                        new com.eveningoutpost.dexdrip.camaps.OtaUpdateManager(getActivity());
+
+                // Version display
+                android.preference.Preference versionPref = findPreference("camaps_ota_version");
+                if (versionPref != null) {
+                    versionPref.setSummary(BuildConfig.VERSION_NAME
+                            + " (code " + BuildConfig.VERSION_CODE + ")");
+                }
+
+                // Check for updates button
+                android.preference.Preference checkPref = findPreference("camaps_ota_check");
+                final android.preference.Preference downloadPref = findPreference("camaps_ota_download");
+
+                if (checkPref != null) {
+                    checkPref.setOnPreferenceClickListener(preference -> {
+                        checkPref.setSummary("Checking...");
+                        checkPref.setEnabled(false);
+
+                        otaManager.checkForUpdate(result -> {
+                            // Run on UI thread via handler
+                            android.os.Handler mainHandler = new android.os.Handler(
+                                    android.os.Looper.getMainLooper());
+                            mainHandler.post(() -> {
+                                checkPref.setEnabled(true);
+
+                                if (result.errorMessage != null) {
+                                    checkPref.setSummary("Error: " + result.errorMessage);
+                                    if (downloadPref != null) downloadPref.setEnabled(false);
+                                } else if (result.updateAvailable) {
+                                    checkPref.setSummary("Update available: v"
+                                            + result.versionName + " (code " + result.versionCode + ")");
+                                    if (downloadPref != null) {
+                                        downloadPref.setEnabled(true);
+                                        downloadPref.setSummary("Download v"
+                                                + result.versionName + " and install");
+                                        downloadPref.setOnPreferenceClickListener(dp -> {
+                                            downloadPref.setSummary("Downloading...");
+                                            downloadPref.setEnabled(false);
+                                            otaManager.downloadAndInstall(result.apkUrl,
+                                                    result.versionName, success -> {
+                                                        mainHandler.post(() -> {
+                                                            if (success) {
+                                                                downloadPref.setSummary(
+                                                                        "Installation started — check notifications");
+                                                            } else {
+                                                                downloadPref.setSummary(
+                                                                        "Download failed. Check connection.");
+                                                                downloadPref.setEnabled(true);
+                                                            }
+                                                        });
+                                                    });
+                                            return true;
+                                        });
+                                    }
+                                } else {
+                                    checkPref.setSummary("Already up to date (v"
+                                            + BuildConfig.VERSION_NAME + ")");
+                                    if (downloadPref != null) downloadPref.setEnabled(false);
+                                }
+                            });
+                        });
+                        return true;
+                    });
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "setupCamAPSOta error: " + e);
             }
         }
 

@@ -15,6 +15,12 @@ import com.eveningoutpost.dexdrip.models.JoH;
 
 import org.json.JSONObject;
 
+import com.activeandroid.query.Select;
+import com.eveningoutpost.dexdrip.models.BgReading;
+import com.eveningoutpost.dexdrip.models.Treatments;
+import com.eveningoutpost.dexdrip.utilitymodels.PersistentStore;
+import com.eveningoutpost.dexdrip.utilitymodels.PumpStatus;
+
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileWriter;
@@ -25,6 +31,7 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.List;
 import java.util.Locale;
 
 /**
@@ -79,14 +86,9 @@ public class CamAPSLogExporter {
     public static void exportAndUpload(final Context context) {
         new Thread(() -> {
             try {
-                String logContent = captureLogcat(DEFAULT_MAX_LINES);
-                if (logContent.isEmpty()) {
-                    JoH.static_toast_long("No CamAPS logs found — is the bridge active?");
-                    return;
-                }
-
+                String logContent = buildFullLogContent();
                 File savedFile = saveToFile(context, logContent);
-                Log.i(TAG, "Logcat saved to: " + savedFile.getAbsolutePath());
+                Log.i(TAG, "Log saved to: " + savedFile.getAbsolutePath());
 
                 String token = getGistToken(context);
                 boolean isSecret = token != null && !token.isEmpty();
@@ -111,7 +113,6 @@ public class CamAPSLogExporter {
                     JoH.static_toast_long("Log uploaded (" + (isSecret ? "secret" : "public")
                             + ")!\nURL copied to clipboard:\n" + gistUrl);
                 } else {
-                    // Fallback: share the local file
                     JoH.static_toast_long("Upload failed. File saved:\n" + savedFile.getName());
                     shareFile(context, savedFile);
                 }
@@ -130,11 +131,7 @@ public class CamAPSLogExporter {
     public static void exportToFile(final Context context) {
         new Thread(() -> {
             try {
-                String logContent = captureLogcat(DEFAULT_MAX_LINES);
-                if (logContent.isEmpty()) {
-                    JoH.static_toast_long("No CamAPS logs found — is the bridge active?");
-                    return;
-                }
+                String logContent = buildFullLogContent();
                 File savedFile = saveToFile(context, logContent);
                 JoH.static_toast_long("Log saved: " + savedFile.getName());
                 shareFile(context, savedFile);
@@ -146,14 +143,20 @@ public class CamAPSLogExporter {
     }
 
     /**
-     * Capture logcat filtered on all CamAPS tags.
+     * Capture logcat filtered on all CamAPS tags (public API, backward compat).
      *
      * @param maxLines Maximum number of log lines to capture (0 = all available)
      * @return Captured log content as a String, or empty string if capture failed
      */
     public static String captureLogcat(int maxLines) {
+        return buildFullLogContent();
+    }
+
+    /**
+     * Raw logcat capture — just the log lines, no header, no DB snapshot.
+     */
+    private static String captureLogcatRaw(int maxLines) {
         try {
-            // Build logcat command: -d = dump and exit, -s = silent (tags only)
             StringBuilder cmd = new StringBuilder("logcat -d -s");
             for (String tag : CAMAPS_TAGS) {
                 cmd.append(" ").append(tag).append(":V");
@@ -164,13 +167,6 @@ public class CamAPSLogExporter {
                     new InputStreamReader(process.getInputStream()));
 
             StringBuilder sb = new StringBuilder();
-            sb.append("=== xDrip+ CamAPS Bridge Log ===\n");
-            sb.append("Version: ").append(BuildConfig.VERSION_NAME).append("\n");
-            sb.append("Build: ").append(BuildConfig.buildVersion).append("\n");
-            sb.append("Captured: ").append(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date())).append("\n");
-            sb.append("Tags: ").append(String.join(", ", CAMAPS_TAGS)).append("\n");
-            sb.append("================================\n\n");
-
             String line;
             int lineCount = 0;
             while ((line = reader.readLine()) != null) {
@@ -191,6 +187,119 @@ public class CamAPSLogExporter {
             Log.e(TAG, "logcat capture error: " + e.getMessage());
             return "";
         }
+    }
+
+    // ── FULL LOG CONTENT (DB snapshot + logcat) ─────────────────────────────
+
+    private static final long H24_MS = 24 * 60 * 60 * 1000L;
+
+    /**
+     * Build the full log content: header + DB snapshot (24h) + logcat.
+     */
+    private static String buildFullLogContent() {
+        StringBuilder sb = new StringBuilder();
+
+        // Header
+        sb.append("=== xDrip+ CamAPS Bridge Log ===\n");
+        sb.append("Version: ").append(BuildConfig.VERSION_NAME).append("\n");
+        sb.append("Build: ").append(BuildConfig.buildVersion).append("\n");
+        sb.append("Captured: ").append(new SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.US).format(new Date())).append("\n");
+        sb.append("Tags: ").append(String.join(", ", CAMAPS_TAGS)).append("\n");
+        sb.append("================================\n\n");
+
+        // DB snapshot
+        sb.append(dumpDatabase24h());
+
+        // Logcat
+        sb.append("── LOGCAT (CamAPS tags) ────────────────────────────────\n");
+        sb.append(captureLogcatRaw(DEFAULT_MAX_LINES));
+
+        return sb.toString();
+    }
+
+    /**
+     * Dump xDrip internal database: pump status + recent glucose + recent treatments.
+     * Captures the last 24 hours of data for pre/post-update debugging.
+     */
+    private static String dumpDatabase24h() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("── DATABASE SNAPSHOT (last 24h) ──────────────────────\n\n");
+
+        long since = System.currentTimeMillis() - H24_MS;
+
+        try {
+            // Pump status — use toJson() for clean key:value dump
+            String pumpJson = PumpStatus.toJson();
+            sb.append("[Pump Status]\n");
+            sb.append("  ").append(pumpJson).append("\n");
+            sb.append("\n");
+        } catch (Exception e) {
+            sb.append("  (pump status unavailable: ").append(e.getMessage()).append(")\n\n");
+        }
+
+        // Glucose readings (BgReadings table, last 24h)
+        try {
+            List<BgReading> readings = new Select()
+                    .from(BgReading.class)
+                    .where("timestamp > ?", since)
+                    .orderBy("timestamp ASC")
+                    .execute();
+
+            int glucoseCount = readings != null ? readings.size() : 0;
+            sb.append("[Glucose — ").append(glucoseCount).append(" readings in last 24h]\n");
+            if (readings != null && !readings.isEmpty()) {
+                SimpleDateFormat df = new SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US);
+                // Limit to 576 entries (every ~2.5 min) to avoid bloat
+                int maxRows = Math.min(readings.size(), 576);
+                int step = readings.size() > maxRows ? readings.size() / maxRows : 1;
+                for (int i = 0; i < readings.size(); i += step) {
+                    BgReading r = readings.get(i);
+                    String ts = df.format(new Date(r.timestamp));
+                    sb.append("  ").append(ts)
+                            .append("  ").append(String.format(Locale.US, "%.1f", r.calculated_value))
+                            .append(" mmol/L");
+                    if (r.sensor != null && r.sensor.uuid != null) {
+                        // sensor UUID available — reading is valid
+                    }
+                    sb.append("\n");
+                    if (sb.length() > 300_000) {
+                        sb.append("  ... (snapshot truncated, too large)\n");
+                        break;
+                    }
+                }
+            }
+            sb.append("\n");
+        } catch (Exception e) {
+            sb.append("[Glucose — unavailable: ").append(e.getMessage()).append("]\n\n");
+        }
+
+        // Treatments (insulin, carbs) in last 24h
+        try {
+            List<Treatments> treatments = new Select()
+                    .from(Treatments.class)
+                    .where("timestamp > ?", since)
+                    .orderBy("timestamp ASC")
+                    .execute();
+
+            int treatCount = treatments != null ? treatments.size() : 0;
+            sb.append("[Treatments — ").append(treatCount).append(" entries in last 24h]\n");
+            if (treatments != null && !treatments.isEmpty()) {
+                SimpleDateFormat df = new SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US);
+                for (Treatments t : treatments) {
+                    String ts = df.format(new Date(t.timestamp));
+                    sb.append("  ").append(ts);
+                    if (t.eventType != null) sb.append("  type=").append(t.eventType);
+                    if (t.carbs > 0) sb.append("  carbs=").append(String.format(Locale.US, "%.0f", t.carbs)).append("g");
+                    if (t.insulin > 0) sb.append("  insulin=").append(String.format(Locale.US, "%.2f", t.insulin)).append("U");
+                    sb.append("\n");
+                }
+            }
+            sb.append("\n");
+        } catch (Exception e) {
+            sb.append("[Treatments — unavailable: ").append(e.getMessage()).append("]\n\n");
+        }
+
+        return sb.toString();
     }
 
     // ── INTERNAL ──────────────────────────────────────────────────────────────

@@ -142,10 +142,8 @@ public class OtaUpdateManager {
                                    final DownloadCallback callback) {
         new Thread(() -> {
             try {
-                File apkFile = new File(
-                        context.getExternalCacheDir() != null
-                                ? context.getExternalCacheDir()
-                                : context.getCacheDir(),
+                // Internal cache — always available, zero permission required
+                File apkFile = new File(context.getCacheDir(),
                         "xdrip_camaps_update_" + versionName + ".apk");
 
                 Log.i(TAG, "Downloading APK: " + apkUrl + " -> " + apkFile.getAbsolutePath());

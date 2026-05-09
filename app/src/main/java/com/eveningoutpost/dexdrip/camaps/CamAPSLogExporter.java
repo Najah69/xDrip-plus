@@ -308,12 +308,9 @@ public class CamAPSLogExporter {
         String timestamp = new SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(new Date());
         String filename = "camaps_debug_" + timestamp + ".txt";
 
-        // App-private external storage — no WRITE_EXTERNAL_STORAGE permission needed
-        // Files still shareable via FileProvider
-        File dir = context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS);
-        if (dir == null || !dir.exists()) {
-            dir = context.getFilesDir(); // fallback to internal storage
-        }
+        // Internal storage — always available, zero permission required
+        // Shareable via FileProvider (files-path)
+        File dir = new File(context.getFilesDir(), "logs");
         if (!dir.exists()) dir.mkdirs();
 
         File file = new File(dir, filename);
